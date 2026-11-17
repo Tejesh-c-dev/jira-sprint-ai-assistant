@@ -1,0 +1,21 @@
+package com.ablmvp.sprintassistant.data.result;
+
+/** Stable machine-readable codes for data-quality findings. */
+public enum ValidationErrorCode {
+    FILE_MISSING,
+    FILE_UNREADABLE,
+    FILE_EMPTY,
+    HEADER_MISSING,
+    HEADER_DUPLICATE,
+    CSV_STRUCTURE_INVALID,
+    REQUIRED_IDENTIFIER_BLANK,
+    DATE_INVALID,
+    NUMBER_INVALID,
+    NUMBER_NEGATIVE,
+    SENTINEL_UNKNOWN,
+    DUPLICATE_MASTER_IDENTICAL,
+    DUPLICATE_MASTER_CONFLICT,
+    UNKNOWN_SPRINT_REFERENCE,
+    UNKNOWN_ISSUE_REFERENCE,
+    DUPLICATE_LINK_PAIR
+}

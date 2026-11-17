@@ -1,7 +1,8 @@
-﻿# Real Spring XD CSVs are NOT committed — see docs/DATA_MAPPING.md §1
-data/
-data/*.csv
-!data/README.md
+# Real Spring XD CSVs are NOT committed — see docs/DATA_MAPPING.md §1
+# Ignore all local dataset files under data/ (including nested folders),
+# but keep the tracked README that explains where to place them.
+/data/*
+!/data/README.md
 
 # Build artefacts
 target/

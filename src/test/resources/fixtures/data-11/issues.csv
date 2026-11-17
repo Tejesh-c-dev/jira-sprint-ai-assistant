@@ -1,0 +1,5 @@
+key,summary,issueType,status,storyPoint,priority,assignee,description,creator,reporter,watchCount,commentCount,votes,fixVersions,affectedVersions,issueLinks,blockedBy,blocks,dependedOnBy,dependedOn,subtasks
+SYN-101,"Comma, capable summary",Bug,Open,3.5,High,"Alex Doe","First line of synthetic detail
+Second line, still synthetic.",Maker,Reporter
+SYN-102,Optional values are absent,Task,Closed,0,Low
+SYN-103

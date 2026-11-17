@@ -1,0 +1,6 @@
+sprintId,issueKey,storyId,status,assignee,priorityId,summary,initialStoryPoint,currentStoryPoint,projectID
+SYN-SPRINT-1,SYN-101,SYN-STORY-A,Completed,"Alex, Doe",P-1,"Link summary, first",1,2,SYN
+SYN-SPRINT-2,SYN-101,SYN-STORY-B,NotCompleted,,,Carry-over link,2,2,SYN
+SYN-SPRINT-1,SYN-101,SYN-STORY-C,Punted,,,,,
+SYN-SPRINT-1,SYN-999,SYN-STORY-D,Completed,,,,1,,SYN
+SYN-UNKNOWN,SYN-101,SYN-STORY-E,Completed,,,,,,SYN
