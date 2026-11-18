@@ -1,9 +1,9 @@
 # Data Mapping — Spring XD Sprint Health MVP
 
-> Status: **PROVISIONAL / SOURCE-PROFILE BLOCKED (2026-11-18).**
-> The local implementation is complete for synthetic-only ingestion. No upstream CSV has been
-> downloaded or inspected, and DATA-02 remains **BLOCKED** because no reuse or redistribution
-> permission has been established.
+> Status: **REAL SCHEMA CONFIRMED / LICENSING BLOCKED (2026-11-18).**
+> The supplied Spring XD CSV bytes have been profiled and loaded. Synthetic fixtures remain
+> separate test inputs. DATA-02 remains **BLOCKED** because no reuse or redistribution permission
+> has been established.
 
 ## 0. Evidence labels
 

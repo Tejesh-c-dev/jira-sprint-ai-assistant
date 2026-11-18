@@ -11,8 +11,6 @@ import org.apache.commons.csv.DuplicateHeaderMode;
 import java.io.IOException;
 import java.io.Reader;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -20,14 +18,27 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.format.DateTimeFormatterBuilder;
+import java.util.Locale;
 import java.util.*;
 
 /** Loads the three configured CSV files and applies the DATA-10 validation policy. */
 public final class CsvDataLoader {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
+    private static final DateTimeFormatter SPRING_XD_DATE_FORMAT = new DateTimeFormatterBuilder()
+            .parseCaseInsensitive()
+            .appendPattern("d-MMM-yy")
+            .toFormatter(Locale.ENGLISH);
     private final DataSourceProperties properties;
+    private final CsvFileAccess fileAccess;
 
-    public CsvDataLoader(DataSourceProperties properties) { this.properties = Objects.requireNonNull(properties); }
+    public CsvDataLoader(DataSourceProperties properties) {
+        this(properties, new NioCsvFileAccess());
+    }
+    public CsvDataLoader(DataSourceProperties properties, CsvFileAccess fileAccess) {
+        this.properties = Objects.requireNonNull(properties);
+        this.fileAccess = Objects.requireNonNull(fileAccess);
+    }
     public LoadResult load() throws IOException { return load(DataKind.ORIGINAL_LOCAL); }
 
     public LoadResult load(DataKind dataKind) throws IOException {
@@ -68,10 +79,18 @@ public final class CsvDataLoader {
                 "DATA-02 blocked: no reuse or redistribution grant was identified",
                 "prepared in 2020; extraction date not recorded",
                 List.of("filtered historical extract", "developer count is derived", "dependency columns may be empty"),
-                Instant.now(), fingerprints());
+                Instant.now(), fingerprints(findings));
         boolean blocking = findings.stream().anyMatch(ValidationFinding::blocking);
         UsabilityState state = blocking ? UsabilityState.UNUSABLE : findings.isEmpty() ? UsabilityState.USABLE : UsabilityState.USABLE_WITH_WARNINGS;
-        return new LoadResult(issues, sprints, links, quarantine, findings, provenance, state);
+        DatasetLoadOutcome loadOutcome;
+        if (!blocking) {
+            loadOutcome = DatasetLoadOutcome.LOADED;
+        } else if (issues.isEmpty() && sprints.isEmpty() && links.isEmpty()) {
+            loadOutcome = DatasetLoadOutcome.LOAD_FAILED;
+        } else {
+            loadOutcome = DatasetLoadOutcome.PARTIALLY_LOADED;
+        }
+        return new LoadResult(issues, sprints, links, quarantine, findings, provenance, state, loadOutcome);
     }
 
     private static <T> Set<String> ids(List<T> values, java.util.function.Function<T, String> f) {
@@ -83,10 +102,14 @@ public final class CsvDataLoader {
     }
     private List<Issue> parseIssues(Path path, List<ValidationFinding> findings, List<QuarantinedRecord> quarantine) throws IOException {
         return parse(path, FileRole.ISSUES, List.of("key"), findings, (r, s) -> new Issue(
-                text(r,"key"),text(r,"summary"),text(r,"issueType"),text(r,"status"),decimal(r,"storyPoint",s,findings),
-                text(r,"priority"),text(r,"assignee"),text(r,"description"),text(r,"creator"),text(r,"reporter"),
-                text(r,"watchCount"),text(r,"commentCount"),text(r,"votes"),text(r,"fixVersions"),text(r,"affectedVersions"),
-                text(r,"issueLinks"),text(r,"blockedBy"),text(r,"blocks"),text(r,"dependedOnBy"),text(r,"dependedOn"),text(r,"subtasks"),s), quarantine);
+                text(r,"key"),text(r,"summary"),text(r,"issueType"),
+                text(r,"status"),decimal(r,"storyPoint",s,findings),
+                text(r,"priority"),text(r,"assignee"),text(r,"description"),
+                text(r,"creator"),text(r,"reporter"),text(r,"watchcount"),
+                text(r,"commentCount"),text(r,"votes"),text(r,"fixVersions"),
+                text(r,"affectedVersions"),text(r,"issueLinks"),text(r,"blockedBy"),
+                text(r,"blocks"),text(r,"dependedOnBy"),text(r,"dependedOn"),
+                text(r,"subtasks"),s), quarantine);
     }
     public List<IssueSprintLink> parseIssueSprintSummary(Path path, List<ValidationFinding> findings) throws IOException { return parseLinks(path, findings); }
     private List<IssueSprintLink> parseLinks(Path path, List<ValidationFinding> findings) throws IOException {
@@ -116,10 +139,15 @@ public final class CsvDataLoader {
 
     private <T> List<T> parse(Path path, FileRole role, List<String> required, List<ValidationFinding> findings, RecordMapper<T> mapper,
                               List<QuarantinedRecord> quarantine) throws IOException {
-        if (!Files.exists(path)) { findings.add(fileFinding(role,ValidationErrorCode.FILE_MISSING,"required CSV file does not exist",path.toString(),true)); return List.of(); }
-        if (!Files.isRegularFile(path) || !Files.isReadable(path)) { findings.add(fileFinding(role,ValidationErrorCode.FILE_UNREADABLE,"required CSV file is not readable",null,true)); return List.of(); }
-        if (Files.size(path) == 0) { findings.add(fileFinding(role,ValidationErrorCode.FILE_EMPTY,"required CSV file is empty",null,true)); return List.of(); }
-        try (Reader reader=Files.newBufferedReader(path,StandardCharsets.UTF_8); CSVParser parser=CSVFormat.DEFAULT.builder().setHeader().setSkipHeaderRecord(true).setDuplicateHeaderMode(DuplicateHeaderMode.ALLOW_ALL).build().parse(reader)) {
+        if (!fileAccess.exists(path)) { findings.add(fileFinding(role,ValidationErrorCode.FILE_MISSING,"required CSV file does not exist",path.toString(),true)); return List.of(); }
+        if (!fileAccess.isRegularFile(path) || !fileAccess.isReadable(path)) { findings.add(fileFinding(role,ValidationErrorCode.FILE_UNREADABLE,"required CSV file is not readable",null,true)); return List.of(); }
+        try {
+            if (fileAccess.size(path) == 0) { findings.add(fileFinding(role,ValidationErrorCode.FILE_EMPTY,"required CSV file is empty",null,true)); return List.of(); }
+        } catch (IOException ex) {
+            findings.add(fileFinding(role,ValidationErrorCode.FILE_UNREADABLE,"CSV file metadata could not be read",null,true));
+            return List.of();
+        }
+        try (Reader reader=fileAccess.newBufferedReader(path); CSVParser parser=CSVFormat.DEFAULT.builder().setHeader().setSkipHeaderRecord(true).setDuplicateHeaderMode(DuplicateHeaderMode.ALLOW_ALL).build().parse(reader)) {
             List<String> headers=parser.getHeaderNames(); Set<String> seen=new HashSet<>();
             for (String h:headers) if (!seen.add(h)) findings.add(fileFinding(role,ValidationErrorCode.HEADER_DUPLICATE,"duplicate header is not allowed",h,true));
             for (String h:required) if (!headers.contains(h)) findings.add(new ValidationFinding(role,null,h,FindingSeverity.ERROR,ValidationErrorCode.HEADER_MISSING.name(),"required header is missing",null,true));
@@ -152,12 +180,55 @@ public final class CsvDataLoader {
     private static void warnOnSentinels(CSVRecord r,SourceRef s,List<ValidationFinding> fs){for(String h:r.getParser().getHeaderNames()){if(!r.isSet(h))continue;String v=r.get(h).trim();if(Set.of("na","n/a","null","none","-").contains(v.toLowerCase()))fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.SENTINEL_UNKNOWN,"unknown sentinel-like value retained as literal text",v,false));}}
     private static ValidationFinding fileFinding(FileRole r,ValidationErrorCode c,String msg,String raw,boolean blocking){return new ValidationFinding(r,null,null,FindingSeverity.ERROR,c.name(),msg,raw,blocking);}
     private static ValidationFinding finding(SourceRef s,String field,FindingSeverity sev,ValidationErrorCode c,String msg,String raw,boolean blocking){return new ValidationFinding(s.fileRole(),s.recordNumber(),field,sev,c.name(),msg,raw,blocking);}
-    private static String text(CSVRecord r,String h){if(!r.isMapped(h)||!r.isSet(h))return null;String v=r.get(h).trim();return v.isEmpty()?null:v;}
+    private static String text(CSVRecord r,String h){if(!r.isMapped(h)||!r.isSet(h))return null;String v=r.get(h).trim();if(v.isEmpty())return null;return v.replace("\r\n","\n").replace('\r','\n');}
     private static List<String> listValue(CSVRecord r,String h){String v=text(r,h);return v==null?null:List.of(v);}
-    private static BigDecimal decimal(CSVRecord r,String h,SourceRef s,List<ValidationFinding> fs){String v=text(r,h);if(v==null)return null;try{BigDecimal n=new BigDecimal(v);if(n.signum()<0){fs.add(finding(s,h,FindingSeverity.ERROR,ValidationErrorCode.NUMBER_NEGATIVE,"negative numeric value is prohibited and was left absent",v,false));return null;}return n;}catch(NumberFormatException e){fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.NUMBER_INVALID,"optional numeric value is invalid and was left absent",v,false));return null;}}
+    private static BigDecimal decimal(CSVRecord r,String h,SourceRef s,List<ValidationFinding> fs){
+        String v=text(r,h);if(v==null)return null;
+        try{
+            BigDecimal n=new BigDecimal(v);
+            if(n.signum()<0){
+                fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.NUMBER_NEGATIVE,
+                        "negative numeric source value preserved; semantic validity is unresolved",v,false));
+            }
+            return n;
+        }catch(NumberFormatException e){
+            fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.NUMBER_INVALID,
+                    "optional numeric value is invalid and was left absent",v,false));
+            return null;
+        }
+    }
     private static Integer integer(CSVRecord r,String h,SourceRef s,List<ValidationFinding> fs){String v=text(r,h);if(v==null)return null;try{int n=Integer.parseInt(v);if(n<0){fs.add(finding(s,h,FindingSeverity.ERROR,ValidationErrorCode.NUMBER_NEGATIVE,"negative numeric value is prohibited and was left absent",v,false));return null;}return n;}catch(NumberFormatException e){fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.NUMBER_INVALID,"optional integer value is invalid and was left absent",v,false));return null;}}
-    private static LocalDate date(CSVRecord r,String h,SourceRef s,List<ValidationFinding> fs){String v=text(r,h);if(v==null)return null;try{return LocalDate.parse(v,DATE_FORMAT);}catch(DateTimeParseException e){fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.DATE_INVALID,"optional date is invalid and was left absent",v,false));return null;}}
-    private List<FileFingerprint> fingerprints() throws IOException {List<FileFingerprint> out=new ArrayList<>();addFingerprint(out,FileRole.ISSUES,properties.issuesPath());addFingerprint(out,FileRole.ISSUE_SPRINT_SUMMARY,properties.issueSprintSummaryPath());addFingerprint(out,FileRole.SPRINTS,properties.sprintsPath());return out;}
-    private static void addFingerprint(List<FileFingerprint> out,FileRole r,Path p)throws IOException{if(!Files.exists(p)||!Files.isRegularFile(p))return;try{out.add(new FileFingerprint(r,p.getFileName().toString(),Files.size(p),HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(p)))));}catch(NoSuchAlgorithmException e){throw new IllegalStateException("SHA-256 is unavailable",e);}}
+    private static LocalDate date(CSVRecord r,String h,SourceRef s,List<ValidationFinding> fs){
+        String v=text(r,h);if(v==null)return null;
+        try{return LocalDate.parse(v,SPRING_XD_DATE_FORMAT);}
+        catch(DateTimeParseException realFormatException){
+            try{return LocalDate.parse(v,DATE_FORMAT);}
+            catch(DateTimeParseException syntheticFormatException){
+                fs.add(finding(s,h,FindingSeverity.WARNING,ValidationErrorCode.DATE_INVALID,"optional date is invalid and was left absent",v,false));return null;
+            }
+        }
+    }
+    private List<FileFingerprint> fingerprints(List<ValidationFinding> findings) {
+        List<FileFingerprint> out=new ArrayList<>();
+        addFingerprint(out, findings, FileRole.ISSUES, properties.issuesPath());
+        addFingerprint(out, findings, FileRole.ISSUE_SPRINT_SUMMARY, properties.issueSprintSummaryPath());
+        addFingerprint(out, findings, FileRole.SPRINTS, properties.sprintsPath());
+        return out;
+    }
+    private void addFingerprint(List<FileFingerprint> out, List<ValidationFinding> findings,
+                                FileRole role, Path path) {
+        if (!fileAccess.exists(path) || !fileAccess.isRegularFile(path)) return;
+        try {
+            long size = fileAccess.size(path);
+            byte[] bytes = fileAccess.readAllBytes(path);
+            out.add(new FileFingerprint(role, path.getFileName().toString(), size,
+                    HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))));
+        } catch (IOException ex) {
+            findings.add(fileFinding(role, ValidationErrorCode.FINGERPRINT_FAILED,
+                    "CSV fingerprint could not be calculated", path.toString(), true));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
     @FunctionalInterface private interface RecordMapper<T>{T map(CSVRecord record,SourceRef source);}
 }

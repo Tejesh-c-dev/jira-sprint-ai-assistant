@@ -7,8 +7,8 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 /**
  * Minimal application entry point for the Spring XD Sprint Health MVP backend.
  *
- * <p>This shell intentionally contains no web, data-loading or analysis code yet; the data
- * layer (Teammate 1) and the REST layer (Teammate 2) are added in later prompts.
+ * <p>The application starts the CSV-backed read-only API and loads the configured
+ * historical dataset during application startup.
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan

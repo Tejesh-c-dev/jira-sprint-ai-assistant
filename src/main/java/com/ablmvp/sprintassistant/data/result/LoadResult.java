@@ -15,7 +15,25 @@ public record LoadResult(
         List<QuarantinedRecord> quarantinedRecords,
         List<ValidationFinding> findings,
         DatasetProvenance provenance,
-        UsabilityState usabilityState) {
+        UsabilityState usabilityState,
+        DatasetLoadOutcome loadOutcome) {
+
+    public LoadResult(List<Issue> issues, List<Sprint> sprints,
+                      List<IssueSprintLink> issueSprintLinks,
+                      List<QuarantinedRecord> quarantinedRecords,
+                      List<ValidationFinding> findings,
+                      DatasetProvenance provenance,
+                      UsabilityState usabilityState) {
+        this(issues, sprints, issueSprintLinks, quarantinedRecords, findings,
+                provenance, usabilityState,
+                usabilityState == UsabilityState.UNUSABLE
+                        ? (issues == null || issues.isEmpty())
+                            && (sprints == null || sprints.isEmpty())
+                            && (issueSprintLinks == null || issueSprintLinks.isEmpty())
+                            ? DatasetLoadOutcome.LOAD_FAILED
+                            : DatasetLoadOutcome.PARTIALLY_LOADED
+                        : DatasetLoadOutcome.LOADED);
+    }
 
     public LoadResult {
         issues = List.copyOf(issues == null ? List.of() : issues);

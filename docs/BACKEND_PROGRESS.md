@@ -548,3 +548,298 @@ move, and the unresolved source questions S1–S8 stay open until then.
 Teammate 2 may review `docs/DATA_MODEL.md` at any time; a change request updates its §14.1 and this
 log. No confirmation is needed to start consuming the contract, and no estimate-derived metric may be
 built until S1 is closed.
+
+## Phase 1B — Source-fact and membership metrics (2026-11-18)
+
+Phase 1B implementation is limited to the source-fact metrics classified as immediately
+supportable in `docs/METRICS_SPECIFICATION.md`. The implementation is independent of REST
+controllers and does not calculate health, completion rates, carryover or estimate-weighted workload.
+
+### Added implementation
+
+- `MetricAvailability`: `AVAILABLE`, `AVAILABLE_WITH_WARNINGS`, `UNAVAILABLE` and
+  `INSUFFICIENT_DATA`.
+- `MetricResult<T>`: immutable type-safe value plus availability, reasons, source fields and relevant
+  validation finding codes.
+- `SprintMetricsService`: reusable service over `LoadResult` with no REST dependency.
+- `SprintSourceFacts`: source values returned unchanged for recorded counts, individual estimate
+  sums, recorded sprint length and recorded added issue keys.
+- `SprintMetricsResult`: selected sprint plus source facts, distinct membership, assignee
+  distribution, provenance, usability and validation/quarantine evidence.
+- `AssigneeDistribution` and `AssigneeConflict`: distinct issue counts, missing-assignee
+  representation and conflicting observation evidence.
+
+Missing values remain `null` and do not become zero. Actual source zero values remain zero.
+Unknown issue references are excluded from distinct membership and assignee distribution.
+Repeated sprint/issue pairs are de-duplicated by `(sprintId, issueKey)`.
+
+### Supported calculations
+
+- Recorded issue, completed, not-completed, punted and completed-elsewhere counts.
+- Individual eight-category `Sprint.estimateSums` values.
+- Recorded sprint length.
+- Recorded added issue keys, preserved as the loader supplies them.
+- Dataset provenance, findings, quarantine records and usability state.
+- Distinct known issue membership per sprint.
+- Issue-count assignee distribution using link assignee first, issue assignee as fallback.
+
+These calculations do not claim real Spring XD semantics. Synthetic fixtures are test input only.
+
+### Unsupported and unchanged
+
+No completion percentage, carryover, estimate-weighted workload, status-to-completion mapping,
+health threshold or cross-category estimate total was implemented. `CsvDataLoader`,
+`DataSourceProperties` and the normalized domain model contract remain unchanged except for one
+narrow multiline normalization defect: text fields now normalize CRLF and CR newline sequences to
+LF so the synthetic fixture assertion and parsed text use one newline representation.
+
+### Tests
+
+Synthetic-only unit coverage is being added for normal, empty and null-valued sprints, actual zero
+source counts, missing estimates, duplicate links, unknown issue references, conflicting assignees,
+missing assignees, partial findings and unusable datasets.
+
+## Phase 1B finding-scope corrections (2026-11-18)
+
+The metrics review identified that `FileRole` alone is not sufficient to scope validation
+findings. Sprint-source findings are now associated by `ValidationFinding.recordNumber` matching
+the selected sprint's `Sprint.sourceRef.recordNumber`. Dataset-level findings remain
+dataset-level by using a `null` record number.
+
+Membership findings use source-row evidence:
+
+- `UNKNOWN_ISSUE_REFERENCE` matches `IssueSprintLink.sourceRef.recordNumber` and therefore its
+  `sprintId`.
+- `DUPLICATE_LINK_PAIR` matches the first source row for the repeated pair and therefore its
+  `sprintId`.
+- A dataset-level finding with no row number applies to relevant sprints.
+- If a record-numbered finding cannot be associated confidently, it is preserved as dataset-level
+  evidence instead of being dropped or guessed.
+
+Distinct issue counts and assignee distributions distinguish true empty membership from incomplete
+membership with unknown Issue references. Unknown Issue masters remain excluded and remain explicit
+in reasons and finding codes.
+
+The assignee policy remains conservative: one link-level assignee wins over one issue-level
+assignee, while conflicts among repeated link-level assignees remain unresolved. In unresolved
+cases no synthetic assignee is invented, all observations remain in `AssigneeConflict`, and the
+issue is omitted from the assignee count. Missing assignees use the same conservative unresolved
+evidence and do not create an invented `UNASSIGNED` category.
+
+### Remaining blocker
+
+The approved specification does not resolve whether conflicting repeated link-level assignees
+should be assigned by a future rule or remain unresolved. It also leaves the exact representation
+of missing assignees open. No estimate-weighted workload or completion/health calculation was added.
+
+## Phase 1C — Metric contract finalization (2026-11-18)
+
+Phase 1C is specification-only. No Java application source, metrics implementation or test was
+changed. `docs/METRICS_SPECIFICATION.md` now contains a definitive framework-independent catalogue,
+a standardized `MetricResult<T>` contract and a proposed sprint-analysis JSON shape.
+
+### Finalized Phase 1C contracts
+
+- Recorded sprint counts and estimate fields remain source-fact values, never derived or combined.
+- Null, numeric zero and empty collections remain separate representations.
+- Distinct issue membership is keyed by `(sprintId, issueKey)` over links whose issue master exists.
+- Unknown and quarantined references do not inflate counts.
+- Empty membership and incomplete membership are both insufficient, but have distinct reasons.
+- Source-fact findings distinguish sprint-row findings from dataset-level findings; unmatched
+  record findings remain conservative dataset-level evidence.
+- Completion, carryover, estimate combinations, estimate-weighted workload, scope rates and health
+  remain unsupported until source semantics and project decisions are approved.
+
+### Assignee contract
+
+The implementation is conservative:
+
+- exactly one link-level assignee takes precedence over the issue-level assignee;
+- repeated conflicting link-level assignees remain unresolved;
+- link/issue disagreement is preserved in conflict evidence;
+- unresolved issues are not placed under the previously existing implementation-only
+  synthetic `UNASSIGNED` label;
+- missing-assignee representation remains an unresolved project-team decision.
+
+The synthetic `UNASSIGNED` label is not approved in the final contract and must not be introduced
+into any future API shape without explicit human approval.
+
+## Phase 2 — Read-only REST API (2026-11-18)
+
+Phase 2 adds a versioned, read-only HTTP layer over the existing CSV load and metrics services.
+It does not implement persistence, live Jira access, calculation changes or health/completion
+metrics.
+
+### Dependencies and lifecycle
+
+- `spring-boot-starter-web` enables MVC controllers and JSON serialization.
+- `springdoc-openapi-starter-webmvc-api` provides OpenAPI metadata without the Swagger UI dependency.
+- `DatasetConfiguration` creates `CsvDataLoader`, startup-loads `LoadResult` once, and registers
+  `SprintMetricsService`.
+- Missing or unusable CSV inputs are represented by the loader's `LoadResult` and usability state;
+  they do not invent successful dataset loading.
+
+### Implemented endpoints
+
+| Method | Path | Result |
+|---|---|---|
+| GET | `/api/v1/sprints` | All retained sprints in deterministic `sprintId` lexical ordering |
+| GET | `/api/v1/sprints/{sprintId}` | Supported source facts for one sprint, or HTTP 404 |
+| GET | `/api/v1/sprints/{sprintId}/analysis` | Existing metric service result mapped to explicit DTOs |
+| GET | `/api/v1/dataset/status` | Load attempt, usability, finding/quarantine counts and provenance |
+
+Controllers contain HTTP routing only. `SprintReadService` orchestrates repository access and
+`SprintRepository` returns sorted, in-memory loaded sprint records. `SprintMetricsService` remains
+the only metrics calculation service. `ApiMapper` converts domain and metric records to API DTOs.
+
+### Response and error contracts
+
+- Sprint list and detail responses expose only normalized model fields.
+- Analysis responses include full `MetricResult` value, availability, reasons, source fields and
+  finding codes.
+- Missing values serialize as JSON `null`, not zero.
+- Unknown sprints return `{"code":"SPRINT_NOT_FOUND","message":"..."}` with HTTP 404.
+- Invalid request parameters return HTTP 400 with `BAD_REQUEST`.
+- Unhandled server failures return HTTP 500 with `INTERNAL_ERROR` and a generic message.
+- No internal exception or stack trace is returned.
+
+### Dataset status
+
+`dataLoaded` is true only when the startup load attempt produced a `LoadResult`. `loadStatus`
+reports `LOADED`; usability remains an independent `UsabilityState`. Missing files, blocking
+headers and structural failures remain visible through that state, finding counts and provenance.
+If startup loading throws an I/O failure outside the loader's handled paths, the application
+does not start and this endpoint is not available.
+
+### OpenAPI
+
+The API dependency exposes machine-readable OpenAPI metadata and controller operations are
+annotated. Swagger UI is not included.
+
+### Tests
+
+Phase 2 test coverage includes MVC listing, empty listing, detail lookup, sprint 404, analysis
+metric/null/warning preservation, dataset usability/status, safe 500 handling, deterministic
+service ordering and unknown-sprint exceptions.
+
+### Known limitations
+
+- The repository is an in-memory snapshot of startup `LoadResult`, not a persistent repository.
+- Sprint ordering is lexical by `Sprint.sprintId`.
+- Dataset status cannot report an I/O startup failure because the application cannot start in
+  that case.
+- Completion, carryover, health, combined estimates and estimate-weighted workload remain absent.
+
+### Remaining blockers
+
+Real completion and carryover formulas, status mappings, category overlap, estimate units,
+scope encoding, duration convention and health thresholds remain blocked by real-data profiling or
+project-team decisions. DATA-02 remains blocked for real-source provenance and reuse.
+
+## Phase 2E — Complete backend metric and health foundation (2026-11-18)
+
+Phase 2E adds the defensible remainder of the backend while preserving existing metric semantics.
+
+### Implemented
+
+- Additional metric availability states: `PROVISIONAL` and `REQUIRES_HUMAN_DECISION`.
+- Negative decimal source values are retained as source evidence and receive a warning.
+- Sprint health diagnostic service with deterministic `NOT_EVALUABLE` overall status.
+- Health dimensions for completion, scope, carryover, estimates, workload and data completeness.
+- Historical trend observations ordered by start date, missing dates last, then lexical sprint ID.
+- Sprint comparison response with unknown-ID omission and explicit limitations.
+- Dataset quality counts for unknown sprint references, unknown issue references and quarantined
+  issue records.
+
+### Added endpoints
+
+- `GET /api/v1/sprints/{sprintId}/health`
+- `GET /api/v1/sprints/compare?sprintIds=...`
+- `GET /api/v1/sprints/trends`
+- `GET /api/v1/dataset/quality`
+
+No completion formula, carryover formula, scope-change rate, health threshold, combined estimate
+or estimate-weighted workload was implemented.
+
+## Phase 2C Stage 1 — Source discovery and provenance audit (2026-11-18)
+
+The Ayushi1429/Agile-Sprint-Analysis repository contains the three candidate Spring XD CSV
+files and is a later public analysis repository. The RandulaKoralage repository is the collection
+methodology source for the 2020 Spring XD extract.
+
+Neither repository has a detected GitHub licence or `/license` response. Public availability does
+not establish reuse or redistribution permission.
+
+No real CSV was downloaded, copied, profiled or committed. `docs/DATASET_PROVENANCE.md` records
+the source repositories, repository metadata, candidate filenames, reported GitHub sizes and the
+licensing block. Real-data download and all integration stages remain blocked pending human or
+institutional permission.
+
+## Phase 2B — Corrective hardening (2026-11-18)
+
+Phase 2B hardens startup loading and API lifecycle semantics without changing approved metric
+definitions.
+
+### Dataset I/O
+
+- `CsvDataLoader` uses a `CsvFileAccess` abstraction with the NIO implementation as the default.
+- Missing and unreadable files continue to produce blocking `FILE_MISSING`/`FILE_UNREADABLE`
+  validation findings.
+- Metadata and fingerprint I/O are isolated from parsing and do not escape Spring startup as
+  unchecked loader failures.
+- Fingerprint failures produce a blocking `FINGERPRINT_FAILED` finding and no fabricated
+  fingerprint for the affected file.
+- Missing files and fingerprint failures remain visible through `LoadResult.findings`.
+
+### Load outcome and usability
+
+`LoadResult` now carries `DatasetLoadOutcome` separately from `UsabilityState`:
+
+- `NOT_ATTEMPTED`
+- `LOADED`
+- `LOAD_FAILED`
+- `PARTIALLY_LOADED`
+
+Load completion no longer implies usable data. Dataset status reports `loadStatus` and
+`usabilityState` independently, and `dataLoaded` means `LOADED` or `PARTIALLY_LOADED`.
+
+### Service boundaries
+
+`SprintReadService.analyzeSprint(sprintId)` now owns sprint validation and metric orchestration.
+`SprintApiController` calls the public service method and no longer accesses the repository or
+`LoadResult`.
+
+### Ordering and verification
+
+Sprint API ordering is retained as lexical ordering of opaque `Sprint.sprintId` values. No integer
+parsing or chronological inference is performed.
+
+`/v3/api-docs` is enabled by Springdoc and is covered by an integration test. 400, 404 and 500
+operation responses are documented in controller OpenAPI metadata.
+
+## Phase 2D — Real-data integrity and metric investigation (2026-11-18)
+
+The supplied real files were inspected directly. No loader formula or metric formula was changed.
+
+### Highest-priority findings
+
+- 599 unresolved summary-to-master issue-reference rows involve 522 distinct keys.
+- No whitespace or case normalization resolves the unknown keys.
+- Unknown references occur across many sprints and include completed and punted statuses.
+- 85 duplicate issue-master keys are conflicting snapshots differing by `sprint`; 90 extra rows
+  are quarantined by the existing conservative loader policy.
+- No repeated `(sprintId, issueKey)` summary pair exists.
+- No unknown sprint reference exists.
+- 341 known issue keys are linked across multiple sprints, but this is not carryover evidence.
+- 64 known issue-master keys have no issue-summary link; this is an extraction/coverage gap.
+
+### Metric consequences
+
+- The source category counts do not consistently partition `totalNumberOfIssues`.
+- `Done` and issue-summary `Completed` are separate source vocabularies; no completion mapping
+  is established.
+- Initial/current estimate fields contain decimal values and one negative initial estimate.
+- Assignee fields use different representations (display names versus usernames) and require
+  approved crosswalk/policy decisions.
+- `issueKeysAddedDuringSprint` is present but its scope semantics are unresolved.
+- Sprint health remains unavailable; no threshold or formula was implemented.

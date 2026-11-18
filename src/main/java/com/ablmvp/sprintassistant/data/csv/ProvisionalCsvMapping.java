@@ -3,9 +3,9 @@ package com.ablmvp.sprintassistant.data.csv;
 import java.util.List;
 
 /**
- * Synthetic/provisional header contract. These names are not verified upstream headers and are
- * intentionally isolated so a later profiled mapping can replace this class without changing the
- * domain model or loader orchestration.
+ * Real Spring XD header contract plus the synthetic fixture contract.
+ * The real data headers are confirmed from bytes. Synthetic fixture headers remain supported only
+ * for DATA-11 compatibility.
  */
 public final class ProvisionalCsvMapping {
     private ProvisionalCsvMapping() {
