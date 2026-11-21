@@ -19,9 +19,10 @@ three CSV files and no licence file or reuse grant. The three files were also re
 byte-identical copies of the 2020 Randula dataset. Those are provenance facts only; they do not
 grant permission to copy, transform, commit, or redistribute the data.
 
-The worktree currently contains no upstream/original CSV and no derived dataset row. `data/` is
-limited to its explanatory README; the only CSV files present in the worktree are the explicitly
-labelled synthetic fixtures under `src/test/resources/fixtures/data-11/`. No CSV is tracked by Git.
+The user-provided local files are now present as `data/spring-xd/issues.csv` (1,992 data rows),
+`data/spring-xd/issue_sprint_summary.csv` (2,861 data rows), and `data/spring-xd/sprints.csv`
+(66 data rows, 67 lines including the header). Their observed headers match the real-data mapping
+below. The `/data/*` ignore rule keeps these local source files out of Git; no CSV is tracked.
 
 The upstream README's claims about approximately 1,992 issues, 2,861 summary rows and 67 sprint
 file lines remain **documented, not verified row counts**. They are not used by the loader or tests.
@@ -32,7 +33,7 @@ The loader reads three configurable paths under `app.data`:
 
 | Property | Default |
 |---|---|
-| `app.data.directory` | `data` |
+| `app.data.directory` | `data/spring-xd` (configured in `application.properties`) |
 | `app.data.issues-filename` | `issues.csv` |
 | `app.data.issue-sprint-summary-filename` | `issue_sprint_summary.csv` |
 | `app.data.sprints-filename` | `sprints.csv` |
